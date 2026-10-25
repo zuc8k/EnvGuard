@@ -53,8 +53,8 @@ Code Scanning.
 ### From source (current)
 
 ```bash
-git clone https://github.com/boodyzucks/secretscope.git
-cd secretscope
+git clone https://github.com/zuc8k/SecretsCope.git
+cd SecretsCope
 npm install
 npm run build
 node dist/cli/index.js --help
@@ -74,6 +74,9 @@ npm install -g @boodyzucks/secretscope
 secretscope --help
 ```
 
+> The npm package name is a placeholder until the first publication.
+> Until then, use the source build above.
+
 ---
 
 ## Usage
@@ -81,7 +84,7 @@ secretscope --help
 ### Basic scan
 
 ```bash
-secretscope /path/to/project
+node dist/cli/index.js /path/to/project
 ```
 
 If no path is given, the current working directory is scanned.
@@ -89,14 +92,14 @@ If no path is given, the current working directory is scanned.
 ### Output formats
 
 ```bash
-secretscope . --format json
-secretscope . --format sarif --output report.sarif
+node dist/cli/index.js . --format json
+node dist/cli/index.js . --format sarif --output report.sarif
 ```
 
 ### Strict CI gating
 
 ```bash
-secretscope . --strict
+node dist/cli/index.js . --strict
 ```
 
 Exit code `1` if any finding is reported, `0` if the scan is clean, `2` on fatal
@@ -107,10 +110,10 @@ finding exists.
 
 ```bash
 # 1. See the proposed additions (dry-run, default)
-secretscope . --fix
+node dist/cli/index.js . --fix
 
 # 2. Apply the proposal (writes to .env.example only)
-secretscope . --fix --yes
+node dist/cli/index.js . --fix --yes
 ```
 
 The fixer:
@@ -122,7 +125,7 @@ The fixer:
 ### Exclude paths
 
 ```bash
-secretscope . --exclude "**/generated/**" --exclude "**/*.config.js"
+node dist/cli/index.js . --exclude "**/generated/**" --exclude "**/*.config.js"
 ```
 
 Default ignored directories: `node_modules`, `.git`, `dist`, `build`, `out`,
@@ -144,8 +147,7 @@ console.log(report.summary);
 ## Example output (shape)
 
 The console reporter groups findings by category. A run against a project with
-one undocumented variable would produce output in this shape (format defined by
-`src/reporters/console-reporter.ts`):
+one undocumented variable would produce output in this shape:
 
 ```
 SecretScope v0.1.0 — scan report
