@@ -48,6 +48,7 @@
   "dependencies": {
     "commander": "^12.1.0",
     "fast-glob": "^3.3.2",
+    "ignore": "^5.3.0",
     "ts-morph": "^23.0.0",
     "zod": "^3.23.8"
   },
