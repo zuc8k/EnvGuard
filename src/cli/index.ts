@@ -3,22 +3,22 @@
  * SecretScope — CLI entry point.
  *
  * Exit codes:
- *   0  Scan completed successfully, no error-severity findings,
- *      and (if --strict) no findings at all.
- *   1  Scan completed successfully, but findings require attention
- *      (any error-severity finding, or --strict with any finding).
+ *   0  Scan completed, no error-severity findings, and (if --strict)
+ *      no findings at all.
+ *   1  Scan completed but findings require attention, or --strict
+ *      with any finding.
  *   2  Fatal error: invalid options, inaccessible root, or an
  *      unexpected exception.
  *
  * Output routing:
- *   - Default: report goes to stdout. Progress and warnings go to stderr.
- *   - With --output: report goes to the given file. Progress and
- *     warnings still go to stderr.
- *   - --quiet suppresses info-level log messages but never suppresses
- *     the report or error messages.
+ *   - Report goes to stdout by default, or to --output path.
+ *   - Logs and warnings go to stderr.
+ *   - --fix without --yes prints a proposal to stderr and never
+ *     writes to disk.
  */
 
 import { promises as fs } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { Command } from 'commander';
 
@@ -27,8 +27,10 @@ import { formatConsoleReport } from '../reporters/console-reporter.js';
 import { formatJsonReport } from '../reporters/json-reporter.js';
 import { formatSarifReport } from '../reporters/sarif-reporter.js';
 import { Logger } from '../utils/logger.js';
+import { fileExists } from '../utils/fs-safe.js';
+import { proposeFix, type FixProposal } from '../fixers/env-example-fixer.js';
 import { parseCliOptions, type CliOptions } from './options.js';
-import type { ScanReport } from '../core/types.js';
+import type { Finding, ScanReport } from '../core/types.js';
 
 const program = new Command();
 
@@ -60,6 +62,16 @@ program
   .option('-q, --quiet', 'Suppress info-level log messages', false)
   .option('--verbose', 'Enable verbose log messages', false)
   .option('--no-color', 'Disable ANSI colors in console output')
+  .option(
+    '--fix',
+    'Propose additions to .env.example. Without --yes, this is a dry-run.',
+    false,
+  )
+  .option(
+    '--yes',
+    'Confirm the fix proposal. Required to write to disk.',
+    false,
+  )
   .argument('[path]', 'Alias for --root')
   .action(async (pathArg: string | undefined) => {
     const opts = program.opts();
@@ -78,6 +90,8 @@ program
         quiet: opts.quiet,
         verbose: opts.verbose,
         color: opts.color,
+        fix: opts.fix,
+        yes: opts.yes,
       });
     } catch (err) {
       process.stderr.write(`Error: ${errorMessage(err)}\n`);
@@ -91,6 +105,9 @@ program
 
     logger.debug(`Root: ${options.root}`);
     logger.debug(`Format: ${options.format}`);
+    if (options.fix) {
+      logger.debug(`Fix mode: ${options.yes ? 'apply' : 'dry-run'}`);
+    }
 
     let report: ScanReport;
     try {
@@ -121,12 +138,131 @@ program
       process.exit(2);
     }
 
+    if (options.fix) {
+      await runFixer(report, options, logger);
+    }
+
     const hasError = report.findings.some((f) => f.severity === 'error');
     const hasAny = report.findings.length > 0;
     if (hasError || (options.strict && hasAny)) {
       process.exitCode = 1;
     }
   });
+
+/**
+ * Runs the fixer (proposal only, or apply with --yes).
+ *
+ * Discovers `.env.example` next to the scanned root. If the file is
+ * missing, we explicitly do NOT create it — we print the proposal
+ * to stderr so the user can create it themselves.
+ */
+async function runFixer(
+  report: ScanReport,
+  options: CliOptions,
+  logger: Logger,
+): Promise<void> {
+  const undocumented = report.findings.filter(
+    (f) => f.category === 'undocumented-env-var',
+  );
+  if (undocumented.length === 0) {
+    logger.info('No undocumented variables to fix.');
+    return;
+  }
+
+  const missingVars = extractVarNames(undocumented);
+  const examplePath = resolve(options.root, '.env.example');
+
+  if (!(await fileExists(examplePath))) {
+    printCreateProposal(examplePath, missingVars, logger);
+    return;
+  }
+
+  let existingContent: string;
+  try {
+    existingContent = await fs.readFile(examplePath, 'utf8');
+  } catch (err) {
+    logger.error(`Failed to read .env.example: ${errorMessage(err)}`);
+    return;
+  }
+
+  const apply = options.yes === true;
+  const proposal = proposeFix({
+    examplePath,
+    existingContent,
+    missingVars,
+    apply,
+  });
+
+  printFixProposal(proposal, examplePath, logger);
+
+  if (proposal.applied && proposal.added.length > 0) {
+    try {
+      await fs.writeFile(examplePath, proposal.updatedContent, 'utf8');
+      logger.info(
+        `Wrote ${proposal.added.length} addition(s) to ${examplePath}`,
+      );
+    } catch (err) {
+      logger.error(`Failed to write .env.example: ${errorMessage(err)}`);
+    }
+  } else if (!proposal.applied && proposal.added.length > 0) {
+    logger.info(
+      'Dry run. Re-run with --fix --yes to write these changes.',
+    );
+  }
+}
+
+/**
+ * Extracts variable names from undocumented findings. The names
+ * appear in the finding message as the first token after
+ * "Environment variable ". This is a fragile parse but the message
+ * format is controlled by differ.ts and stable for 0.1.x.
+ */
+function extractVarNames(findings: readonly Finding[]): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const f of findings) {
+    const match = /Environment variable (\S+) is defined/.exec(f.message);
+    if (!match || !match[1]) continue;
+    if (seen.has(match[1])) continue;
+    seen.add(match[1]);
+    names.push(match[1]);
+  }
+  return names;
+}
+
+function printCreateProposal(
+  examplePath: string,
+  missingVars: readonly string[],
+  logger: Logger,
+): void {
+  logger.warn(
+    `${examplePath} does not exist. Not creating it automatically. ` +
+      `Create it manually with the following variables:`,
+  );
+  for (const name of missingVars) {
+    process.stderr.write(`  ${name}=\n`);
+  }
+}
+
+function printFixProposal(
+  proposal: FixProposal,
+  examplePath: string,
+  logger: Logger,
+): void {
+  if (proposal.added.length === 0) {
+    logger.info(`${basename(examplePath)} is already up to date.`);
+    return;
+  }
+  for (const warning of proposal.warnings) {
+    logger.warn(warning);
+  }
+  logger.info(
+    `Proposed additions to ${examplePath}: ${proposal.added.length}`,
+  );
+  for (const name of proposal.added) {
+    process.stderr.write(`  + ${name}\n`);
+  }
+}
 
 function formatReport(report: ScanReport, options: CliOptions): string {
   switch (options.format) {
@@ -145,6 +281,10 @@ function formatReport(report: ScanReport, options: CliOptions): string {
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+// Silence "declared but never used" for helpers kept for future use.
+void join;
+void dirname;
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`Fatal error: ${errorMessage(err)}\n`);
