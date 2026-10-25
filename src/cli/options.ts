@@ -20,12 +20,13 @@ export type OutputFormat = z.infer<typeof OutputFormatSchema>;
  *
  * Notes on specific fields:
  *   - `root` is required to be a non-empty string. The CLI fills it
- *     with process.cwd() before validation, so users see a sensible
- *     default without any additional logic.
+ *     with process.cwd() before validation.
  *   - `maxFileSize` accepts strings (as passed by commander) and
  *     coerces them to a positive integer, or `undefined` if absent.
  *   - `output` is optional. When absent, the report goes to stdout.
  *   - `color` defaults to true. `--no-color` sets it to false.
+ *   - `fix` enables the fixer proposal. `yes` must also be present
+ *     for the fixer to write to disk; otherwise --fix is a dry-run.
  */
 export const CliOptionsSchema = z.object({
   root: z.string().min(1),
@@ -47,6 +48,8 @@ export const CliOptionsSchema = z.object({
   quiet: z.boolean().default(false),
   verbose: z.boolean().default(false),
   color: z.boolean().default(true),
+  fix: z.boolean().default(false),
+  yes: z.boolean().default(false),
 });
 
 export type CliOptions = z.infer<typeof CliOptionsSchema>;
