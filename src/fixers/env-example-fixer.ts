@@ -10,8 +10,9 @@
  *   - If the target file does not exist, this module does NOT create
  *     it. It returns a proposal instead, and the CLI prints it.
  *   - Variables already present in the file are never re-added.
- *   - The original content is preserved; additions are appended as a
- *     clearly marked block with a blank line separator.
+ *   - The original content is preserved verbatim; additions are
+ *     appended as a clearly marked block with exactly one blank line
+ *     separator before the marker.
  */
 
 /** A single proposed addition. */
@@ -66,6 +67,16 @@ export function collectExistingNames(content: string): Set<string> {
  * Builds the new content by appending missing variables as a
  * clearly marked block. Preserves the original text verbatim,
  * including line endings.
+ *
+ * Layout (for a non-empty existing file):
+ *   <existing, trailing whitespace trimmed>
+ *   <blank line>
+ *   # Added by secretscope --fix
+ *   VAR1=
+ *   VAR2=
+ *   <trailing newline>
+ *
+ * For an empty existing file, no leading blank lines are emitted.
  */
 export function buildUpdatedContent(
   existingContent: string,
@@ -76,16 +87,17 @@ export function buildUpdatedContent(
   const useCrlf = existingContent.includes('\r\n');
   const newline = useCrlf ? '\r\n' : '\n';
 
-  const block = [
-    '',
+  const sectionLines = [
     FIX_SECTION_MARKER,
     ...varsToAdd.map((name) => `${name}=`),
-    '',
-  ].join(newline);
+  ];
+  const section = sectionLines.join(newline);
 
-  // Ensure exactly one blank line before the marker.
   const trimmedEnd = existingContent.replace(/\s+$/, '');
-  return `${trimmedEnd}${block}`;
+  if (trimmedEnd === '') {
+    return `${section}${newline}`;
+  }
+  return `${trimmedEnd}${newline}${newline}${section}${newline}`;
 }
 
 /**
