@@ -18,7 +18,7 @@
  */
 
 import { promises as fs } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 
 import { Command } from 'commander';
 
@@ -149,13 +149,6 @@ program
     }
   });
 
-/**
- * Runs the fixer (proposal only, or apply with --yes).
- *
- * Discovers `.env.example` next to the scanned root. If the file is
- * missing, we explicitly do NOT create it — we print the proposal
- * to stderr so the user can create it themselves.
- */
 async function runFixer(
   report: ScanReport,
   options: CliOptions,
@@ -211,12 +204,6 @@ async function runFixer(
   }
 }
 
-/**
- * Extracts variable names from undocumented findings. The names
- * appear in the finding message as the first token after
- * "Environment variable ". This is a fragile parse but the message
- * format is controlled by differ.ts and stable for 0.1.x.
- */
 function extractVarNames(findings: readonly Finding[]): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
@@ -281,10 +268,6 @@ function formatReport(report: ScanReport, options: CliOptions): string {
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
-
-// Silence "declared but never used" for helpers kept for future use.
-void join;
-void dirname;
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`Fatal error: ${errorMessage(err)}\n`);
